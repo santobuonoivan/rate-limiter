@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+
+# Build output
+dist/
+build/
+*.js
+*.js.map
+!jest.config.js
+
+# Tests
+coverage/
+.nyc_output/
+*.test.ts
+*.spec.ts
+test/
+
+# Environment
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+DESIGN.md
+*.md
+!package.json
+
+# Misc
+trash/
+.editorconfig
+.prettierrc
+.eslintrc.js
