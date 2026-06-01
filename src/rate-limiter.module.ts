@@ -161,7 +161,13 @@ export class RateLimiterModule {
       module: RateLimiterModule,
       providers,
       controllers: [ObservabilityController],
-      exports: [RateLimiterService, RateLimiterConfigService, MetricsService],
+      exports: [
+        RateLimiterService,
+        RateLimiterConfigService,
+        MetricsService,
+        STORAGE_ADAPTER,
+        RATE_LIMITER_STRATEGY,
+      ],
     };
   }
 }

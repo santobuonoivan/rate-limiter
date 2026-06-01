@@ -168,7 +168,6 @@ describe("SlidingWindowCounterAlgorithm", () => {
 
       const now = Date.now();
       const windowMillis = 60 * 1000;
-      const currentWindowStart = Math.floor(now / windowMillis) * windowMillis;
 
       // Estado de hace 3 ventanas (muy antiguo)
       mockStorage.get.mockResolvedValue({
@@ -451,8 +450,6 @@ describe("SlidingWindowCounterAlgorithm", () => {
       };
 
       const now = Date.now();
-      const windowMillis = 60 * 1000;
-      const currentWindowStart = Math.floor(now / windowMillis) * windowMillis;
 
       // Request permitido
       mockStorage.get.mockResolvedValue({

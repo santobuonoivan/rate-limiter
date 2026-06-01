@@ -10,9 +10,15 @@ describe("Rate Limiter E2E Tests", () => {
   let storage: InMemoryStorage;
 
   beforeAll(async () => {
+    // Crear la instancia de storage aquí para tener control directo sobre ella
+    storage = new InMemoryStorage();
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(STORAGE_ADAPTER)
+      .useValue(storage)
+      .compile();
 
     app = moduleFixture.createNestApplication();
 
@@ -26,8 +32,6 @@ describe("Rate Limiter E2E Tests", () => {
     );
 
     app.enableCors();
-
-    storage = moduleFixture.get<InMemoryStorage>(STORAGE_ADAPTER);
 
     await app.init();
   });

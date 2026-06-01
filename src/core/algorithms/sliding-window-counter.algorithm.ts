@@ -49,7 +49,7 @@ export class SlidingWindowCounterAlgorithm implements RateLimiterStrategy {
     const previousWindowStart = currentWindowStart - windowMillis;
 
     // Obtener estado actual
-    let state = await storage.get(key);
+    const state = await storage.get(key);
 
     let currentCount = 0;
     let previousCount = 0;

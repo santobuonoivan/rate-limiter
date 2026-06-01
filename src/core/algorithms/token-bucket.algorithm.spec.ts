@@ -1,10 +1,5 @@
 import { TokenBucketAlgorithm } from "./token-bucket.algorithm";
-import {
-  RateLimitRule,
-  TimeUnit,
-  StorageAdapter,
-  BucketState,
-} from "../interfaces";
+import { RateLimitRule, TimeUnit, StorageAdapter } from "../interfaces";
 
 describe("TokenBucketAlgorithm", () => {
   let algorithm: TokenBucketAlgorithm;
