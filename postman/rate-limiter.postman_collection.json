@@ -1,0 +1,610 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Rate Limiter API",
+    "description": "Colección completa para probar el Rate Limiter NestJS.\n\nEndpoints organizados por categoría con tests automáticos que verifican:\n- Headers de rate limiting (X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset)\n- Códigos de respuesta\n- Estructura del body\n\nCómo disparar el rate limit:\n- Usá el Postman Runner sobre la carpeta \"🔥 Stress Tests\"\n- Configura las iteraciones según el límite del endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:{{port}}",
+      "type": "default"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Tests globales aplicados a TODOS los requests",
+          "const rateLimitHeaders = ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'];",
+          "",
+          "if (pm.response.code !== 429) {",
+          "  rateLimitHeaders.forEach(header => {",
+          "    pm.test(`Header '${header}' presente`, () => {",
+          "      pm.expect(pm.response.headers.get(header)).to.not.be.undefined;",
+          "    });",
+          "  });",
+          "",
+          "  // Guardar estado del rate limit en variables de entorno",
+          "  const remaining = pm.response.headers.get('X-RateLimit-Remaining');",
+          "  const limit = pm.response.headers.get('X-RateLimit-Limit');",
+          "  if (remaining !== null) pm.environment.set('lastRemaining', remaining);",
+          "  if (limit !== null) pm.environment.set('lastLimit', limit);",
+          "}",
+          "",
+          "if (pm.response.code === 429) {",
+          "  pm.test('429 tiene header Retry-After', () => {",
+          "    pm.expect(pm.response.headers.get('Retry-After')).to.not.be.undefined;",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "🩺 Observability",
+      "description": "Endpoints de salud y métricas del sistema. No tienen rate limit estricto.",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica el estado del sistema incluyendo el storage backend.\n\nRespuesta:\n- `status`: ok\n- `storage.type`: memory | redis\n- `storage.status`: healthy | unhealthy"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Body tiene status ok', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql('ok');",
+                  "});",
+                  "",
+                  "pm.test('Body tiene storage info', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.storage).to.have.property('type');",
+                  "  pm.expect(json.storage).to.have.property('status');",
+                  "});",
+                  "",
+                  "pm.test('Responde en menos de 200ms', () => {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Prometheus Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": ["{{baseUrl}}"],
+              "path": ["metrics"]
+            },
+            "description": "Métricas en formato Prometheus para scraping.\n\nMétricas expuestas:\n- `rate_limiter_requests_total`\n- `rate_limiter_limit_exceeded_total`\n- `rate_limiter_check_duration_seconds`\n- `rate_limiter_storage_errors_total`"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Content-Type es text/plain', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain');",
+                  "});",
+                  "",
+                  "pm.test('Contiene métricas de rate limiter', () => {",
+                  "  pm.expect(pm.response.text()).to.include('rate_limiter');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔐 Auth",
+      "description": "Endpoints de autenticación. Son los más restrictivos para prevenir brute force.",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"john_doe\",\n  \"password\": \"secret123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "⚠️ Rate limit: **5 req/minuto**\n\nSimula autenticación. Con 6 requests seguidos debería devolver 429."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "  pm.test('Body tiene message y username', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json).to.have.property('message');",
+                  "    pm.expect(json).to.have.property('username');",
+                  "  });",
+                  "} else if (pm.response.code === 429) {",
+                  "  pm.test('Rate limit alcanzado (429)', () => pm.response.to.have.status(429));",
+                  "",
+                  "  pm.test('Body tiene retryAfter', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json).to.have.property('retryAfter');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"new_user\",\n  \"email\": \"new_user@example.com\",\n  \"password\": \"securepass456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "⚠️ Rate limit: **3 req/hora** (muy restrictivo)\n\nSimula registro de usuario."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "  pm.test('Body tiene message y username', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json).to.have.property('message');",
+                  "    pm.expect(json).to.have.property('username');",
+                  "  });",
+                  "} else if (pm.response.code === 429) {",
+                  "  pm.test('Rate limit alcanzado (429)', () => pm.response.to.have.status(429));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "📝 Content",
+      "description": "Endpoints de contenido con límites moderados.",
+      "item": [
+        {
+          "name": "Get Feed",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/feed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "feed"]
+            },
+            "description": "⚠️ Rate limit: **60 req/minuto**\n\nRetorna lista de posts del feed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "  pm.test('Body tiene items array', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.items).to.be.an('array');",
+                  "  });",
+                  "} else if (pm.response.code === 429) {",
+                  "  pm.test('Rate limit alcanzado (429)', () => pm.response.to.have.status(429));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Mi primer post\",\n  \"content\": \"Contenido del post de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/posts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts"]
+            },
+            "description": "⚠️ Rate limit: **10 req/minuto**\n\nCrea un nuevo post."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "  pm.test('Body tiene post con id', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.post).to.have.property('id');",
+                  "    pm.expect(json.post).to.have.property('title');",
+                  "    pm.expect(json.post).to.have.property('createdAt');",
+                  "  });",
+                  "} else if (pm.response.code === 429) {",
+                  "  pm.test('Rate limit alcanzado (429)', () => pm.response.to.have.status(429));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postId\": \"post-123\",\n  \"content\": \"Excelente post!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments"]
+            },
+            "description": "⚠️ Rate limit: **30 req/minuto**\n\nCrea un comentario en un post."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "  pm.test('Body tiene comment con id y postId', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.comment).to.have.property('id');",
+                  "    pm.expect(json.comment).to.have.property('postId');",
+                  "  });",
+                  "} else if (pm.response.code === 429) {",
+                  "  pm.test('Rate limit alcanzado (429)', () => pm.response.to.have.status(429));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🧪 General Testing",
+      "description": "Endpoints básicos para testing del rate limiter.",
+      "item": [
+        {
+          "name": "Test Endpoint",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/test",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "test"]
+            },
+            "description": "⚠️ Rate limit: **10 req/minuto**\n\nEndpoint básico para verificar que el rate limiter está activo."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "  pm.test('Body tiene message y timestamp', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json).to.have.property('message');",
+                  "    pm.expect(json).to.have.property('timestamp');",
+                  "  });",
+                  "} else if (pm.response.code === 429) {",
+                  "  pm.test('Rate limit alcanzado (429)', () => pm.response.to.have.status(429));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "API Health (rate-limited)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": "⚠️ Rate limit: **200 req/minuto** (muy permisivo)\n\nHealth check con rate limit activo (a diferencia de /health)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test('Body tiene status ok', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "🔥 Stress Tests",
+      "description": "Requests para disparar el rate limit.\n\nCómo usar:\n1. Clic derecho en la carpeta → 'Run folder'\n2. Configurar las iteraciones (ej: 15 para /api/test que tiene límite de 10)\n3. Delay: 0ms para simular ráfaga\n4. Observar los 429 en la respuesta",
+      "item": [
+        {
+          "name": "Burst Test → /api/test (límite: 10/min)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "stress-test-client",
+                "description": "Identificador custom para aislar el test"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/test",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "test"]
+            },
+            "description": "Ejecutar con Runner: **15 iteraciones, 0ms delay**\n\nLas primeras 10 devolverán 200, las siguientes 429."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = parseInt(pm.response.headers.get('X-RateLimit-Remaining') || '-1');",
+                  "const status = pm.response.code;",
+                  "",
+                  "console.log(`Request #${pm.info.iteration + 1} → Status: ${status} | Remaining: ${remaining}`);",
+                  "",
+                  "if (status === 200) {",
+                  "  pm.test(`[OK] Request permitido (remaining: ${remaining})`, () => {",
+                  "    pm.expect(status).to.eql(200);",
+                  "  });",
+                  "} else if (status === 429) {",
+                  "  pm.test('[BLOCKED] Rate limit alcanzado correctamente ✓', () => {",
+                  "    pm.expect(status).to.eql(429);",
+                  "  });",
+                  "  const retryAfter = pm.response.headers.get('Retry-After');",
+                  "  console.log(`Retry-After: ${retryAfter}s`);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Burst Test → /api/auth/login (límite: 5/min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Client-Id",
+                "value": "stress-test-client"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"attacker\",\n  \"password\": \"wrong_password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Ejecutar con Runner: **8 iteraciones, 0ms delay**\n\nSimula un ataque de brute force. Las primeras 5 pasan, luego bloquea."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = parseInt(pm.response.headers.get('X-RateLimit-Remaining') || '-1');",
+                  "const status = pm.response.code;",
+                  "",
+                  "console.log(`Request #${pm.info.iteration + 1} → Status: ${status} | Remaining: ${remaining}`);",
+                  "",
+                  "if (status === 200) {",
+                  "  pm.test(`[OK] Login permitido (remaining: ${remaining})`, () => {",
+                  "    pm.expect(status).to.eql(200);",
+                  "  });",
+                  "} else if (status === 429) {",
+                  "  pm.test('[BLOCKED] Brute force bloqueado correctamente ✓', () => {",
+                  "    pm.expect(status).to.eql(429);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Check Rate Limit Headers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/feed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "feed"]
+            },
+            "description": "Inspecciona los headers de rate limiting en detalle."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('X-RateLimit-Limit presente y es número', () => {",
+                  "  const val = pm.response.headers.get('X-RateLimit-Limit');",
+                  "  pm.expect(val).to.not.be.null;",
+                  "  pm.expect(parseInt(val)).to.be.above(0);",
+                  "});",
+                  "",
+                  "pm.test('X-RateLimit-Remaining presente y >= 0', () => {",
+                  "  const val = pm.response.headers.get('X-RateLimit-Remaining');",
+                  "  pm.expect(val).to.not.be.null;",
+                  "  pm.expect(parseInt(val)).to.be.at.least(0);",
+                  "});",
+                  "",
+                  "pm.test('X-RateLimit-Reset presente y es timestamp futuro', () => {",
+                  "  const val = pm.response.headers.get('X-RateLimit-Reset');",
+                  "  pm.expect(val).to.not.be.null;",
+                  "  pm.expect(parseInt(val)).to.be.above(Date.now() / 1000 - 1);",
+                  "});",
+                  "",
+                  "// Mostrar resumen en consola",
+                  "console.log('--- Rate Limit Headers ---');",
+                  "console.log('Limit:    ', pm.response.headers.get('X-RateLimit-Limit'));",
+                  "console.log('Remaining:', pm.response.headers.get('X-RateLimit-Remaining'));",
+                  "console.log('Reset:    ', pm.response.headers.get('X-RateLimit-Reset'));",
+                  "console.log('--------------------------');"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

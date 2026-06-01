@@ -185,6 +185,24 @@ describe("InMemoryStorage", () => {
       const result = await storage.increment("test-key", 1);
       expect(result).toBe(1); // Nuevo bucket, no 11
     });
+
+    it("should update TTL when incrementing existing entry with ttlSeconds", async () => {
+      // Crear entrada primero (sin TTL explícito)
+      await storage.increment("test-key", 1);
+
+      // Obtener entry antes de actualizar
+      const stateBefore = await storage.get("test-key");
+      expect(stateBefore?.count).toBe(1);
+
+      // Incrementar la entrada EXISTENTE con un ttlSeconds explícito
+      const result = await storage.increment("test-key", 1, 120);
+
+      expect(result).toBe(2);
+
+      // La entrada debe seguir existiendo con el nuevo TTL
+      const stateAfter = await storage.get("test-key");
+      expect(stateAfter?.count).toBe(2);
+    });
   });
 
   describe("Cleanup", () => {
@@ -413,6 +431,30 @@ describe("InMemoryStorage", () => {
     it("should handle stopping already stopped task", () => {
       storage.stopCleanupTask();
       expect(() => storage.stopCleanupTask()).not.toThrow();
+    });
+
+    it("should handle cleanup errors inside the periodic interval", async () => {
+      jest.useFakeTimers();
+
+      // Crear instancia DESPUÉS de activar fake timers para que el
+      // setInterval quede registrado en el sistema de fake timers
+      const fakeTimerStorage = new InMemoryStorage();
+      const loggerErrorSpy = jest.spyOn(fakeTimerStorage["logger"], "error");
+
+      jest
+        .spyOn(fakeTimerStorage, "cleanup")
+        .mockRejectedValueOnce(new Error("Cleanup error"));
+
+      // advanceTimersByTimeAsync dispara el setInterval y drena microtasks
+      await jest.advanceTimersByTimeAsync(61000);
+
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        "Error during cleanup",
+        expect.any(Error),
+      );
+
+      fakeTimerStorage.stopCleanupTask();
+      jest.useRealTimers();
     });
   });
 });

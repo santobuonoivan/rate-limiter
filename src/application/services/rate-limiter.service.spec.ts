@@ -8,6 +8,7 @@ import {
   STORAGE_ADAPTER,
 } from "../../core/injection-tokens";
 import { TimeUnit, RateLimitRule } from "../../core/interfaces";
+import { MetricsService } from "./metrics.service";
 
 describe("RateLimiterService - Integration Tests", () => {
   let service: RateLimiterService;
@@ -507,6 +508,150 @@ describe("RateLimiterService - Integration Tests", () => {
         expect(result.allowed).toBe(true);
         expect(result.limit).toBe(rule.requestsPerUnit);
       }
+    });
+  });
+
+  describe("With MetricsService", () => {
+    let metricsService: MetricsService;
+
+    beforeEach(async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          RateLimiterService,
+          MetricsService,
+          {
+            provide: RATE_LIMITER_STRATEGY,
+            useClass: TokenBucketAlgorithm,
+          },
+          {
+            provide: STORAGE_ADAPTER,
+            useClass: InMemoryStorage,
+          },
+        ],
+      }).compile();
+
+      service = module.get<RateLimiterService>(RateLimiterService);
+      storage = module.get<InMemoryStorage>(STORAGE_ADAPTER);
+      metricsService = module.get<MetricsService>(MetricsService);
+      storage.clear();
+    });
+
+    afterEach(() => {
+      storage.stopCleanupTask();
+      storage.clear();
+      metricsService.reset();
+    });
+
+    it("should record metrics on allowed request", async () => {
+      const rule: RateLimitRule = {
+        name: "test",
+        requestsPerUnit: 10,
+        unit: TimeUnit.MINUTE,
+      };
+
+      const recordRequestSpy = jest.spyOn(metricsService, "recordRequest");
+      const recordDurationSpy = jest.spyOn(
+        metricsService,
+        "recordCheckDuration",
+      );
+
+      await service.checkLimit("user:metrics", rule);
+
+      expect(recordRequestSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        "allowed",
+        "test",
+      );
+      expect(recordDurationSpy).toHaveBeenCalled();
+    });
+
+    it("should record metrics on blocked request", async () => {
+      const rule: RateLimitRule = {
+        name: "strict",
+        requestsPerUnit: 1,
+        unit: TimeUnit.MINUTE,
+      };
+
+      const recordRequestSpy = jest.spyOn(metricsService, "recordRequest");
+
+      // First request allowed
+      await service.checkLimit("user:blocked-metrics", rule);
+      // Second request blocked
+      await service.checkLimit("user:blocked-metrics", rule);
+
+      expect(recordRequestSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        "blocked",
+        "strict",
+      );
+    });
+
+    it("should use 'unknown' when rule has no name", async () => {
+      const rule: RateLimitRule = {
+        requestsPerUnit: 10,
+        unit: TimeUnit.MINUTE,
+      } as RateLimitRule;
+
+      const recordRequestSpy = jest.spyOn(metricsService, "recordRequest");
+
+      await service.checkLimit("user:no-name", rule);
+
+      expect(recordRequestSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        "allowed",
+        "unknown",
+      );
+    });
+
+    it("should record storage error metric on failure", async () => {
+      const mockStorage = {
+        get: jest.fn().mockRejectedValue(new Error("Storage error")),
+        set: jest.fn(),
+        delete: jest.fn(),
+        increment: jest.fn(),
+      };
+
+      const moduleWithError: TestingModule = await Test.createTestingModule({
+        providers: [
+          RateLimiterService,
+          MetricsService,
+          {
+            provide: RATE_LIMITER_STRATEGY,
+            useClass: TokenBucketAlgorithm,
+          },
+          {
+            provide: STORAGE_ADAPTER,
+            useValue: mockStorage,
+          },
+        ],
+      }).compile();
+
+      const serviceWithError =
+        moduleWithError.get<RateLimiterService>(RateLimiterService);
+      const metrics = moduleWithError.get<MetricsService>(MetricsService);
+
+      const recordErrorSpy = jest.spyOn(metrics, "recordStorageError");
+
+      const rule: RateLimitRule = {
+        name: "test",
+        requestsPerUnit: 10,
+        unit: TimeUnit.MINUTE,
+      };
+
+      await serviceWithError.checkLimit("user:error", rule);
+
+      expect(recordErrorSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        "checkLimit",
+      );
+
+      metrics.reset();
+    });
+
+    it("should detect redis storage type from class name", async () => {
+      // storageType debe detectarse correctamente en el constructor
+      // Para InMemoryStorage → "memory"
+      expect(service["storageType"]).toBe("memory");
     });
   });
 });

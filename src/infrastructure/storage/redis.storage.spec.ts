@@ -490,5 +490,151 @@ describe("RedisStorage", () => {
         expect.any(Function),
       );
     });
+
+    it("should trigger connect event handler", () => {
+      const connectHandler = mockRedisClient.on.mock.calls.find(
+        (call: string[]) => call[0] === "connect",
+      )?.[1];
+      expect(() => connectHandler?.()).not.toThrow();
+    });
+
+    it("should trigger ready event handler", () => {
+      const readyHandler = mockRedisClient.on.mock.calls.find(
+        (call: string[]) => call[0] === "ready",
+      )?.[1];
+      expect(() => readyHandler?.()).not.toThrow();
+    });
+
+    it("should trigger error event handler", () => {
+      const errorHandler = mockRedisClient.on.mock.calls.find(
+        (call: string[]) => call[0] === "error",
+      )?.[1];
+      expect(() => errorHandler?.(new Error("test error"))).not.toThrow();
+    });
+
+    it("should trigger close event handler", () => {
+      const closeHandler = mockRedisClient.on.mock.calls.find(
+        (call: string[]) => call[0] === "close",
+      )?.[1];
+      expect(() => closeHandler?.()).not.toThrow();
+    });
+
+    it("should trigger reconnecting event handler", () => {
+      const reconnectHandler = mockRedisClient.on.mock.calls.find(
+        (call: string[]) => call[0] === "reconnecting",
+      )?.[1];
+      expect(() => reconnectHandler?.()).not.toThrow();
+    });
+  });
+
+  describe("Circuit breaker disabled", () => {
+    let noCircuitStorage: RedisStorage;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      noCircuitStorage = new RedisStorage({ circuitBreakerEnabled: false });
+    });
+
+    afterEach(async () => {
+      await noCircuitStorage.onModuleDestroy();
+    });
+
+    it("should still get values when circuit breaker is disabled", async () => {
+      const bucketState: BucketState = {
+        count: 5,
+        lastUpdate: Date.now(),
+      };
+
+      mockRedisClient.get.mockResolvedValue(JSON.stringify(bucketState));
+
+      const result = await noCircuitStorage.get("test-key");
+
+      expect(result).toEqual(bucketState);
+    });
+
+    it("should return null for missing key when circuit breaker is disabled", async () => {
+      mockRedisClient.get.mockResolvedValue(null);
+
+      const result = await noCircuitStorage.get("test-key");
+
+      expect(result).toBeNull();
+    });
+
+    it("should set values when circuit breaker is disabled", async () => {
+      const state: BucketState = { count: 10, lastUpdate: Date.now() };
+      mockRedisClient.set.mockResolvedValue("OK");
+
+      await noCircuitStorage.set("test-key", state);
+
+      expect(mockRedisClient.set).toHaveBeenCalledWith(
+        "ratelimit:bucket:test-key",
+        JSON.stringify(state),
+      );
+    });
+
+    it("should set values with TTL when circuit breaker is disabled", async () => {
+      const state: BucketState = { count: 10, lastUpdate: Date.now() };
+      mockRedisClient.setex.mockResolvedValue("OK");
+
+      await noCircuitStorage.set("test-key", state, 60);
+
+      expect(mockRedisClient.setex).toHaveBeenCalledWith(
+        "ratelimit:bucket:test-key",
+        60,
+        JSON.stringify(state),
+      );
+    });
+
+    it("should delete keys when circuit breaker is disabled", async () => {
+      mockRedisClient.del.mockResolvedValue(1);
+
+      await noCircuitStorage.delete("test-key");
+
+      expect(mockRedisClient.del).toHaveBeenCalledWith(
+        "ratelimit:bucket:test-key",
+      );
+    });
+
+    it("should increment when circuit breaker is disabled", async () => {
+      mockRedisClient.eval.mockResolvedValue(3);
+
+      const result = await noCircuitStorage.increment("test-key", 1);
+
+      expect(result).toBe(3);
+      expect(mockRedisClient.eval).toHaveBeenCalled();
+    });
+
+    it("should handle get error gracefully when circuit breaker disabled", async () => {
+      mockRedisClient.get.mockRejectedValue(new Error("Redis down"));
+
+      const result = await noCircuitStorage.get("test-key");
+
+      expect(result).toBeNull();
+    });
+
+    it("should handle set error gracefully when circuit breaker disabled", async () => {
+      const state: BucketState = { count: 5, lastUpdate: Date.now() };
+      mockRedisClient.set.mockRejectedValue(new Error("Redis down"));
+
+      await expect(
+        noCircuitStorage.set("test-key", state),
+      ).resolves.toBeUndefined();
+    });
+
+    it("should handle delete error gracefully when circuit breaker disabled", async () => {
+      mockRedisClient.del.mockRejectedValue(new Error("Redis down"));
+
+      await expect(
+        noCircuitStorage.delete("test-key"),
+      ).resolves.toBeUndefined();
+    });
+
+    it("should return increment value on error when circuit breaker disabled", async () => {
+      mockRedisClient.eval.mockRejectedValue(new Error("Redis down"));
+
+      const result = await noCircuitStorage.increment("test-key", 7);
+
+      expect(result).toBe(7);
+    });
   });
 });
