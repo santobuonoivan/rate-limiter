@@ -1,0 +1,23 @@
+# Directorios generados
+node_modules/
+dist/
+build/
+coverage/
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# GitHub Actions workflows (ya tienen formato específico)
+.github/
+
+# Archivos de configuración AWS
+.aws/
+
+# Reportes de coverage (HTML generado)
+coverage/lcov-report/
+
+# Logs
+logs/
+*.log

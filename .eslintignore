@@ -1,0 +1,35 @@
+# Directorios generados
+node_modules/
+dist/
+build/
+coverage/
+
+# GitHub Actions workflows (no son código TypeScript)
+.github/
+
+# Archivos de configuración AWS
+.aws/
+
+# Archivos de build
+*.js
+*.d.ts
+
+# Archivos de test E2E
+test/
+
+# Archivos de configuración
+*.json
+*.yml
+*.yaml
+
+# Logs
+logs/
+*.log
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# Docker
+Dockerfile
+docker-compose.yml

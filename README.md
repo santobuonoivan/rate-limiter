@@ -1,5 +1,9 @@
 # Rate Limiter - Sistema de Control de Tasa Distribuido
 
+![CI Pipeline](https://github.com/santobuonoivan/rate-limiter/workflows/CI%20Pipeline/badge.svg)
+![Deploy to AWS](https://github.com/santobuonoivan/rate-limiter/workflows/Deploy%20to%20AWS/badge.svg)
+[![codecov](https://codecov.io/gh/santobuonoivan/rate-limiter/branch/main/graph/badge.svg)](https://codecov.io/gh/santobuonoivan/rate-limiter)
+
 Sistema de control de tasa (rate limiting) implementado con NestJS que proporciona protección contra abuso de API mediante algoritmos de Token Bucket y Sliding Window Counter.
 
 ## 🚀 Características
@@ -7,12 +11,14 @@ Sistema de control de tasa (rate limiting) implementado con NestJS que proporcio
 - ✅ **Múltiples Algoritmos**: Token Bucket y Sliding Window Counter
 - ✅ **Almacenamiento Flexible**: In-Memory o Redis
 - ✅ **Docker Ready**: Dockerfile multi-stage y docker-compose
+- ✅ **CI/CD Automático**: GitHub Actions con deploy a AWS
 - ✅ **Alta Cobertura de Tests**: Unit, Integration, E2E y Concurrency tests
 - ✅ **Configuración por Entorno**: Variables de entorno para todos los parámetros
 - ✅ **Identificación de Cliente**: Por IP, X-API-Key, X-User-Id o Authorization header
 - ✅ **Límites por Endpoint**: Configuración granular por ruta
 - ✅ **Headers Estándar**: `X-RateLimit-*` y `Retry-After`
 - ✅ **Fail-Open Strategy**: Disponibilidad sobre exactitud en caso de error
+- ✅ **Production Ready**: Desplegable en AWS ECS con un solo comando
 
 ## 📋 Requisitos
 
@@ -442,6 +448,71 @@ El sistema incluye logging de:
 - Errores de storage
 - Estado de rate limits
 
+## 🚀 Deployment Automático (AWS)
+
+El proyecto incluye GitHub Actions para CI/CD automático con deployment a AWS.
+
+> **⚠️ Nota Importante:** Todos los workflows (CI y deployment) están configurados para ejecutarse **únicamente en la rama `main`**. Los releases deben crearse desde `main` para activar el deployment automático.
+
+### Quick Start
+
+**1. Crear Release (Deployment Automático):**
+
+```bash
+# Asegurarse de estar en main
+git checkout main
+git pull origin main
+
+# Crear y pushear tag
+git tag v1.0.0
+git push origin v1.0.0
+
+# En GitHub UI: Releases → Create release → Publish
+# El workflow se ejecuta automáticamente
+```
+
+### Workflows Configurados
+
+#### CI Pipeline (`.github/workflows/ci.yml`)
+
+- ✅ Ejecuta en cada push/PR a `main`
+- ✅ Lint, tests unitarios, E2E, y security scan
+- ✅ Build de Docker image
+- ✅ Tests en Node 18 y 20
+
+#### Deploy to AWS (`.github/workflows/deploy-aws.yml`)
+
+- ✅ Trigger: Release publicado o manual
+- ✅ Tests completos antes de deploy
+- ✅ Build y push a AWS ECR
+- ✅ Deploy a AWS ECS Fargate
+- ✅ Wait for service stability
+- ✅ Notificaciones de resultado
+
+### Configuración Requerida
+
+**GitHub Secrets (obligatorios):**
+
+```
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_REGION
+ECR_REPOSITORY
+ECS_CLUSTER
+ECS_SERVICE
+REDIS_HOST
+REDIS_PASSWORD
+```
+
+**Infraestructura AWS necesaria:**
+
+- ECR Repository
+- ECS Cluster (Fargate)
+- ECS Service
+- ElastiCache Redis
+- Application Load Balancer (opcional)
+- IAM Roles (ecsTaskExecutionRole, ecsTaskRole)
+
 ## 🤝 Contribución
 
 1. Fork del repositorio
@@ -453,19 +524,6 @@ El sistema incluye logging de:
 ## 📝 Licencia
 
 ISC
-
-## 🎯 Challenge Requirements ✅
-
-- [x] **Dockerización completa** con Dockerfile multi-stage
-- [x] **Docker Compose** con todos los servicios necesarios
-- [x] **Variables de entorno** documentadas y ejemplos
-- [x] **Suite de tests completa**:
-  - [x] Unit tests (77 tests, 48% coverage)
-  - [x] Integration tests incluidos
-  - [x] E2E tests (14 tests, 100% passing)
-  - [x] Concurrency tests (8 tests activos)
-- [x] **Good average de testeo**: ~50% overall, 87%+ en core algorithms
-- [x] **Documentación completa** de setup y uso
 
 ## 📚 Referencias
 
