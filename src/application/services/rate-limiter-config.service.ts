@@ -11,17 +11,6 @@ export interface EndpointRuleConfig {
 
 /**
  * Servicio de configuración para reglas de rate limiting.
- *
- * Centraliza la definición de reglas y permite diferentes políticas
- * según el endpoint, tipo de usuario, o acción específica.
- *
- * En producción, estas reglas podrían cargarse desde:
- * - Variables de entorno
- * - Archivos YAML/JSON
- * - Base de datos
- * - Servicio de configuración remoto
- *
- * Para este MVP, están hardcodeadas pero en una estructura fácil de migrar.
  */
 @Injectable()
 export class RateLimiterConfigService {
@@ -128,7 +117,7 @@ export class RateLimiterConfigService {
   }
 
   /**
-   * Obtiene todas las reglas configuradas (útil para debugging)
+   * Obtiene todas las reglas configuradas (debugging)
    */
   getAllRules(): EndpointRuleConfig {
     return { ...this.endpointRules };
