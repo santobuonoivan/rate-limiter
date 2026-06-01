@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from "@nestjs/common";
+import { Injectable, Logger, Inject, Optional } from "@nestjs/common";
 import {
   RateLimiterStrategy,
   RateLimitResult,
@@ -9,6 +9,7 @@ import {
   RATE_LIMITER_STRATEGY,
   STORAGE_ADAPTER,
 } from "../../core/injection-tokens";
+import { MetricsService } from "./metrics.service";
 
 /**
  * Servicio principal de Rate Limiting.
@@ -30,15 +31,21 @@ import {
 @Injectable()
 export class RateLimiterService {
   private readonly logger = new Logger(RateLimiterService.name);
+  private readonly storageType: string;
 
   constructor(
     @Inject(RATE_LIMITER_STRATEGY)
     private readonly strategy: RateLimiterStrategy,
     @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
+    @Optional() private readonly metricsService?: MetricsService,
   ) {
     this.logger.log(
       `RateLimiterService initialized with strategy: ${this.strategy.name}`,
     );
+    // Detectar tipo de storage para métricas
+    this.storageType = storage.constructor.name.toLowerCase().includes("redis")
+      ? "redis"
+      : "memory";
   }
 
   /**
@@ -61,9 +68,26 @@ export class RateLimiterService {
    * ```
    */
   async checkLimit(key: string, rule: RateLimitRule): Promise<RateLimitResult> {
+    const startTime = Date.now();
+
     try {
       // Delegar a la estrategia configurada
       const result = await this.strategy.checkLimit(key, rule, this.storage);
+
+      // Registrar métricas si el servicio está disponible
+      if (this.metricsService) {
+        const duration = (Date.now() - startTime) / 1000; // en segundos
+        this.metricsService.recordCheckDuration(
+          this.strategy.name,
+          this.storageType,
+          duration,
+        );
+        this.metricsService.recordRequest(
+          this.strategy.name,
+          result.allowed ? "allowed" : "blocked",
+          rule.name || "unknown",
+        );
+      }
 
       // Logging condicional: solo registrar rechazos para reducir ruido
       if (!result.allowed) {
@@ -74,6 +98,11 @@ export class RateLimiterService {
 
       return result;
     } catch (error) {
+      // Registrar error en métricas
+      if (this.metricsService) {
+        this.metricsService.recordStorageError(this.storageType, "checkLimit");
+      }
+
       // En caso de error en el rate limiter, loggear pero NO bloquear el request
       // Esto implementa "fail open" para alta disponibilidad
       this.logger.error(

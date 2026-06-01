@@ -18,6 +18,10 @@ import { RateLimiterInterceptor } from "./infrastructure/interceptors/rate-limit
 // Application
 import { RateLimiterService } from "./application/services/rate-limiter.service";
 import { RateLimiterConfigService } from "./application/services/rate-limiter-config.service";
+import { MetricsService } from "./application/services/metrics.service";
+
+// Controllers
+import { ObservabilityController } from "./infrastructure/controllers/observability.controller";
 
 /**
  * Enum para seleccionar el algoritmo de rate limiting
@@ -146,6 +150,7 @@ export class RateLimiterModule {
       RateLimiterService,
       RateLimiterConfigService,
       RateLimiterInterceptor,
+      MetricsService,
     ];
 
     if (interceptorProvider) {
@@ -155,7 +160,8 @@ export class RateLimiterModule {
     return {
       module: RateLimiterModule,
       providers,
-      exports: [RateLimiterService, RateLimiterConfigService],
+      controllers: [ObservabilityController],
+      exports: [RateLimiterService, RateLimiterConfigService, MetricsService],
     };
   }
 }

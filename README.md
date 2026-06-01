@@ -20,6 +20,21 @@ Sistema de control de tasa (rate limiting) implementado con NestJS que proporcio
 - ✅ **Fail-Open Strategy**: Disponibilidad sobre exactitud en caso de error
 - ✅ **Production Ready**: Desplegable en AWS ECS con un solo comando
 
+### 🔍 Observabilidad y Resiliencia
+
+- ✅ **Prometheus Metrics**: Métricas detalladas para monitoreo
+  - `rate_limiter_requests_total`: Total de requests procesadas
+  - `rate_limiter_limit_exceeded_total`: Total de requests bloqueadas
+  - `rate_limiter_check_duration_seconds`: Latencia de verificación
+  - `rate_limiter_storage_errors_total`: Errores de storage
+- ✅ **Health Check Endpoint**: `/health` para K8s/ECS health checks
+- ✅ **Circuit Breaker**: Protección automática ante fallos de Redis
+  - Configuración de timeout, error threshold y reset timeout
+  - Fail-fast para mejorar latencia en caso de problemas
+- ✅ **Timeouts Configurables**: Control granular de timeouts de Redis
+  - Connection timeout: 5000ms (configurable)
+  - Command timeout: 3000ms (configurable)
+
 ## 📋 Requisitos
 
 - Node.js 20+ o Docker
@@ -100,13 +115,25 @@ Todas las opciones se configuran mediante variables de entorno (ver `.env.exampl
 
 ### Variables de Redis
 
-| Variable           | Default    | Descripción                |
-| ------------------ | ---------- | -------------------------- |
-| `REDIS_HOST`       | localhost  | Host de Redis              |
-| `REDIS_PORT`       | 6379       | Puerto de Redis            |
-| `REDIS_PASSWORD`   | -          | Contraseña de Redis        |
-| `REDIS_DB`         | 0          | Base de datos de Redis     |
-| `REDIS_KEY_PREFIX` | ratelimit: | Prefijo para keys de Redis |
+| Variable                | Default   | Descripción                      |
+| ----------------------- | --------- | -------------------------------- |
+| `REDIS_HOST`            | localhost | Host de Redis                    |
+| `REDIS_PORT`            | 6379      | Puerto de Redis                  |
+| `REDIS_PASSWORD`        | -         | Contraseña de Redis              |
+| `REDIS_DB`              | 0         | Base de datos de Redis           |
+| `REDIS_KEY_PREFIX`      | ratelimit | Prefijo para keys de Redis       |
+| `REDIS_CONNECT_TIMEOUT` | 5000      | Timeout de conexión (ms)         |
+| `REDIS_COMMAND_TIMEOUT` | 3000      | Timeout de comandos (ms)         |
+| `REDIS_MAX_RETRIES`     | 3         | Máximo de reintentos por request |
+
+### Variables de Circuit Breaker (Redis)
+
+| Variable                                | Default | Descripción                          |
+| --------------------------------------- | ------- | ------------------------------------ |
+| `REDIS_CIRCUIT_BREAKER_ENABLED`         | true    | Habilitar circuit breaker            |
+| `REDIS_CIRCUIT_BREAKER_TIMEOUT`         | 3000    | Timeout del circuit breaker (ms)     |
+| `REDIS_CIRCUIT_BREAKER_ERROR_THRESHOLD` | 50      | % de errores para abrir circuito     |
+| `REDIS_CIRCUIT_BREAKER_RESET_TIMEOUT`   | 30000   | Tiempo antes de intentar cerrar (ms) |
 
 ### Variables de Rate Limiting
 
@@ -232,6 +259,102 @@ curl -X POST http://localhost:3000/api/auth/login \
 
 ```bash
 curl -X GET http://localhost:3000/api/health
+```
+
+### Endpoints de Observabilidad
+
+#### GET /metrics
+
+Endpoint de métricas en formato Prometheus para scraping.
+
+- **Sin Rate Limit**: Este endpoint no tiene rate limiting
+- **Formato**: Prometheus text format
+- **Uso**: Scraping de Prometheus, monitoreo
+
+```bash
+curl http://localhost:3000/metrics
+```
+
+**Métricas expuestas:**
+
+```
+# Requests totales por algoritmo y estado
+rate_limiter_requests_total{algorithm="TokenBucket",status="allowed",endpoint="/api/test"} 150
+
+# Límites excedidos
+rate_limiter_limit_exceeded_total{algorithm="TokenBucket",endpoint="/api/test"} 5
+
+# Latencia de verificación (histogram)
+rate_limiter_check_duration_seconds_bucket{algorithm="TokenBucket",storage="redis",le="0.01"} 140
+rate_limiter_check_duration_seconds_sum{algorithm="TokenBucket",storage="redis"} 1.234
+rate_limiter_check_duration_seconds_count{algorithm="TokenBucket",storage="redis"} 150
+
+# Errores de storage
+rate_limiter_storage_errors_total{storage="redis",operation="get"} 2
+
+# Métricas del sistema (CPU, memoria, etc.)
+rate_limiter_process_cpu_user_seconds_total 12.34
+rate_limiter_process_resident_memory_bytes 52428800
+```
+
+**Configuración de Prometheus:**
+
+```yaml
+scrape_configs:
+  - job_name: "rate-limiter"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["localhost:3000"]
+```
+
+#### GET /health
+
+Health check endpoint para monitoreo y orchestrators (K8s, ECS).
+
+- **Sin Rate Limit**: Este endpoint no tiene rate limiting
+- **Formato**: JSON
+- **Uso**: Kubernetes liveness/readiness probes, ECS health checks
+
+```bash
+curl http://localhost:3000/health
+```
+
+**Respuesta:**
+
+```json
+{
+  "status": "ok",
+  "timestamp": 1705316400000,
+  "storage": {
+    "type": "redis",
+    "status": "healthy"
+  }
+}
+```
+
+**Estados posibles:**
+
+- `ok`: Todo funcionando correctamente
+- `degraded`: Storage no disponible pero servicio funcional (fail-open)
+
+**Configuración Kubernetes:**
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
 ```
 
 #### GET /api/feed

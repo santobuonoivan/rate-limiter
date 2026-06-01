@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import Redis, { RedisOptions } from "ioredis";
+import CircuitBreaker from "opossum";
 import { StorageAdapter, BucketState } from "../../core/interfaces";
 
 /**
@@ -14,6 +15,13 @@ export interface RedisStorageConfig {
   maxRetriesPerRequest?: number;
   enableReadyCheck?: boolean;
   enableOfflineQueue?: boolean;
+  connectTimeout?: number; // Timeout para establecer conexión (ms)
+  commandTimeout?: number; // Timeout para comandos individuales (ms)
+  // Circuit breaker configuration
+  circuitBreakerEnabled?: boolean; // Habilitar circuit breaker (default: true)
+  circuitBreakerTimeout?: number; // Timeout del circuit breaker (ms, default: 3000)
+  circuitBreakerErrorThreshold?: number; // % de errores para abrir (default: 50)
+  circuitBreakerResetTimeout?: number; // Tiempo antes de intentar cerrar (ms, default: 30000)
 }
 
 /**
@@ -51,6 +59,12 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
   private readonly client: Redis;
   private readonly keyPrefix: string;
 
+  // Circuit breakers para operaciones críticas
+  private readonly getBreaker: CircuitBreaker;
+  private readonly setBreaker: CircuitBreaker;
+  private readonly deleteBreaker: CircuitBreaker;
+  private readonly incrementBreaker: CircuitBreaker;
+
   constructor(config?: RedisStorageConfig) {
     const redisOptions: RedisOptions = {
       host: config?.host || process.env.REDIS_HOST || "localhost",
@@ -62,6 +76,13 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
         parseInt(process.env.REDIS_MAX_RETRIES || "3"),
       enableReadyCheck: config?.enableReadyCheck ?? true,
       enableOfflineQueue: config?.enableOfflineQueue ?? true,
+      // Timeouts configurables para mejorar resiliencia
+      connectTimeout:
+        config?.connectTimeout ||
+        parseInt(process.env.REDIS_CONNECT_TIMEOUT || "5000"),
+      commandTimeout:
+        config?.commandTimeout ||
+        parseInt(process.env.REDIS_COMMAND_TIMEOUT || "3000"),
       retryStrategy: (times: number) => {
         // Retry con backoff exponencial hasta 5 segundos
         const delay = Math.min(times * 100, 5000);
@@ -75,6 +96,10 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
     this.client = new Redis(redisOptions);
     this.keyPrefix =
       config?.keyPrefix || process.env.REDIS_KEY_PREFIX || "ratelimit";
+
+    this.logger.log(
+      `Redis storage initialized with timeouts: connect=${redisOptions.connectTimeout}ms, command=${redisOptions.commandTimeout}ms`,
+    );
 
     // Event handlers
     this.client.on("connect", () => {
@@ -96,6 +121,118 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
     this.client.on("reconnecting", () => {
       this.logger.log("Redis client reconnecting");
     });
+
+    // Configurar circuit breakers si están habilitados
+    const circuitBreakerEnabled = config?.circuitBreakerEnabled ?? true;
+
+    if (circuitBreakerEnabled) {
+      const breakerOptions = {
+        timeout: config?.circuitBreakerTimeout || 3000,
+        errorThresholdPercentage: config?.circuitBreakerErrorThreshold || 50,
+        resetTimeout: config?.circuitBreakerResetTimeout || 30000,
+        name: "redis-storage",
+      };
+
+      this.logger.log(
+        `Circuit breaker enabled with timeout=${breakerOptions.timeout}ms, ` +
+          `errorThreshold=${breakerOptions.errorThresholdPercentage}%, ` +
+          `resetTimeout=${breakerOptions.resetTimeout}ms`,
+      );
+
+      // Circuit breaker para operación GET
+      this.getBreaker = new CircuitBreaker(
+        async (key: string) => {
+          const data = await this.client.get(key);
+          return data ? (JSON.parse(data) as BucketState) : null;
+        },
+        { ...breakerOptions, name: "redis-get" },
+      );
+
+      // Circuit breaker para operación SET
+      this.setBreaker = new CircuitBreaker(
+        async (key: string, data: string, ttl?: number) => {
+          if (ttl && ttl > 0) {
+            await this.client.setex(key, ttl, data);
+          } else {
+            await this.client.set(key, data);
+          }
+        },
+        { ...breakerOptions, name: "redis-set" },
+      );
+
+      // Circuit breaker para operación DELETE
+      this.deleteBreaker = new CircuitBreaker(
+        async (key: string) => {
+          await this.client.del(key);
+        },
+        { ...breakerOptions, name: "redis-delete" },
+      );
+
+      // Circuit breaker para operación INCREMENT (Lua script)
+      this.incrementBreaker = new CircuitBreaker(
+        async (luaScript: string, numKeys: number, ...args: string[]) => {
+          return await this.client.eval(luaScript, numKeys, ...args);
+        },
+        { ...breakerOptions, name: "redis-increment" },
+      );
+
+      // Event listeners para logging
+      [
+        this.getBreaker,
+        this.setBreaker,
+        this.deleteBreaker,
+        this.incrementBreaker,
+      ].forEach((breaker) => {
+        breaker.on("open", () => {
+          this.logger.warn(
+            `Circuit breaker ${breaker.name} opened (too many failures)`,
+          );
+        });
+
+        breaker.on("halfOpen", () => {
+          this.logger.log(
+            `Circuit breaker ${breaker.name} half-open (testing connection)`,
+          );
+        });
+
+        breaker.on("close", () => {
+          this.logger.log(
+            `Circuit breaker ${breaker.name} closed (connection restored)`,
+          );
+        });
+
+        breaker.on("fallback", () => {
+          this.logger.debug(
+            `Circuit breaker ${breaker.name} fallback executed`,
+          );
+        });
+      });
+    } else {
+      // Si circuit breaker está deshabilitado, crear breakers que solo pasan la función
+      this.logger.log("Circuit breaker disabled");
+      const noopBreaker = (fn: any) => ({ fire: fn });
+      this.getBreaker = noopBreaker(async (key: string) => {
+        const data = await this.client.get(key);
+        return data ? (JSON.parse(data) as BucketState) : null;
+      }) as any;
+      this.setBreaker = noopBreaker(
+        async (key: string, data: string, ttl?: number) => {
+          if (ttl && ttl > 0) {
+            await this.client.setex(key, ttl, data);
+          } else {
+            await this.client.set(key, data);
+          }
+        },
+      ) as any;
+      this.deleteBreaker = noopBreaker(async (key: string) => {
+        await this.client.del(key);
+      }) as any;
+      this.incrementBreaker = noopBreaker(
+        async (luaScript: string, numKeys: number, ...args: string[]) => {
+          return await this.client.eval(luaScript, numKeys, ...args);
+        },
+      ) as any;
+    }
   }
 
   /**
@@ -107,17 +244,14 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
 
   /**
    * Obtiene el estado de un bucket desde Redis
+   * Protegido por circuit breaker para fallar rápidamente si Redis está caído
    */
   async get(key: string): Promise<BucketState | null> {
     try {
       const redisKey = this.buildKey(key);
-      const data = await this.client.get(redisKey);
-
-      if (!data) {
-        return null;
-      }
-
-      const state = JSON.parse(data) as BucketState;
+      const state = (await this.getBreaker.fire(
+        redisKey,
+      )) as BucketState | null;
       return state;
     } catch (error) {
       const errorMessage =
@@ -130,6 +264,7 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
 
   /**
    * Guarda el estado de un bucket en Redis con TTL opcional
+   * Protegido por circuit breaker
    */
   async set(
     key: string,
@@ -139,13 +274,7 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
     try {
       const redisKey = this.buildKey(key);
       const data = JSON.stringify(state);
-
-      if (ttlSeconds && ttlSeconds > 0) {
-        // SET con EX (expiration en segundos)
-        await this.client.setex(redisKey, ttlSeconds, data);
-      } else {
-        await this.client.set(redisKey, data);
-      }
+      await this.setBreaker.fire(redisKey, data, ttlSeconds);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -156,11 +285,12 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
 
   /**
    * Elimina un bucket de Redis
+   * Protegido por circuit breaker
    */
   async delete(key: string): Promise<void> {
     try {
       const redisKey = this.buildKey(key);
-      await this.client.del(redisKey);
+      await this.deleteBreaker.fire(redisKey);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -172,6 +302,7 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
 
   /**
    * Incrementa el contador de un bucket de forma atómica usando Lua script
+   * Protegido por circuit breaker
    *
    * El script Lua garantiza atomicidad:
    * 1. Lee el bucket actual
@@ -224,7 +355,7 @@ export class RedisStorage implements StorageAdapter, OnModuleDestroy {
         return state.count
       `;
 
-      const result = await this.client.eval(
+      const result = await this.incrementBreaker.fire(
         luaScript,
         1, // número de KEYS
         redisKey,
