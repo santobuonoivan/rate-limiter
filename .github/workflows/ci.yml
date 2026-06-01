@@ -113,6 +113,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
+          load: true
           tags: rate-limiter:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -138,6 +139,9 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
 
     steps:
       - name: Checkout code
@@ -152,7 +156,7 @@ jobs:
           output: "trivy-results.sarif"
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: "trivy-results.sarif"
 
